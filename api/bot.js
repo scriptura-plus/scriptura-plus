@@ -2,83 +2,104 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).send('Method Not Allowed');
-  }
-
+export async function POST(req) {
   try {
-    const body = req.body;
+    const body = await req.json();
     const msg = body.message;
 
     if (!msg || !msg.text) {
-      return res.status(200).send('OK');
+      return new Response(JSON.stringify({ ok: true }));
     }
 
     const text = msg.text.trim();
     const chatId = msg.chat.id.toString();
     const senderId = msg.from.id.toString();
+    const senderName = msg.from.first_name || 'Пользователь';
+
+    // === Обработка /start ===
+    if (text === '/start') {
+      await fetch(`${TELEGRAM_API}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: '👋 Добро пожаловать! Отправьте мне библейский стих, например «Иоанна 3:16», и я подготовлю для вас карточку с исследованием.',
+        }),
+      });
+      return new Response(JSON.stringify({ ok: true }));
+    }
 
     // === ADMIN MODE ===
     if (senderId === ADMIN_CHAT_ID && text.startsWith('/send')) {
-      const parts = text.split(' ');
+      const parts = text.split('|');
       if (parts.length < 3) {
         await fetch(`${TELEGRAM_API}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             chat_id: ADMIN_CHAT_ID,
-            text: '❌ Ошибка: неверный формат. Нужно: /send <ID> <ссылка> [название стиха]'
-          })
+            text: '❌ Ошибка: неверный формат. Нужно: /send <ID> <ссылка> [название]',
+          }),
         });
-        return res.status(200).send('OK');
+        return new Response(JSON.stringify({ ok: true }));
       }
 
-      const targetChatId = parts[1];
-      const messageLink = parts[2];
-      const optionalTitle = parts.slice(3).join(' ');
+      const targetChatId = parts[1].trim();
+      const messageLink = parts[2].trim();
+      const optionalTitle = parts.slice(3).join('|').trim();
 
-      const finalMessage = `✅ Ваше исследование${optionalTitle ? ' стиха «' + optionalTitle + '»' : ''} готово!\n\n🧾 Ознакомьтесь с карточкой:\n${messageLink}\n\nСпасибо за интерес к Божьему Слову!`;
+      const finalMessage = `✅ Ваше исследование${optionalTitle ? `: *${optionalTitle}*` : ''}\n\n📎 ${messageLink}`;
 
+      // Отправка пользователю
       await fetch(`${TELEGRAM_API}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: targetChatId, text: finalMessage.trim() }),
+        body: JSON.stringify({
+          chat_id: targetChatId,
+          text: finalMessage.trim(),
+          parse_mode: 'Markdown',
+        }),
       });
 
+      // Подтверждение админу
       await fetch(`${TELEGRAM_API}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: ADMIN_CHAT_ID, text: `✅ Ссылка успешно отправлена пользователю ${targetChatId}.` }),
+        body: JSON.stringify({
+          chat_id: ADMIN_CHAT_ID,
+          text: '✅ Ссылка успешно отправлена!',
+        }),
       });
 
-      return res.status(200).send('OK');
+      return new Response(JSON.stringify({ ok: true }));
     }
 
-    // === USER MODE ===
-    const userName = msg.from.first_name || 'друг';
+    // === Обычный запрос от пользователя ===
+    const autoReplyText = `👋 Спасибо, ${senderName}! Ваш запрос на разбор стиха «${text}» получен.\n\nНаш ассистент уже обрабатывает его. В течение 24 часов вы получите готовую карточку с исследованием.`;
 
     await fetch(`${TELEGRAM_API}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
-        text: `👋 Спасибо, ${userName}! Ваш запрос на разбор стиха «${text}» получен.\n\nНаш ассистент уже обрабатывает его. В течение 24 часов вы получите готовую карточку с исследованием.`,
+        text: autoReplyText,
       }),
     });
+
+    const notifyText = `📣 Новый запрос!\n\nПользователь: ${senderName} (${senderId})\nID чата: ${chatId}\n\nЗапрос: ${text}`;
 
     await fetch(`${TELEGRAM_API}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: ADMIN_CHAT_ID,
-        text: `🔔 Новый запрос!\n\nПользователь: ${userName} (${senderId})\nID чата: ${chatId}\n\nЗапрос: ${text}`,
+        text: notifyText,
       }),
     });
 
-    return res.status(200).send('OK');
-  } catch (err) {
-    console.error('Error:', err);
-    return res.status(200).send('OK');
+    return new Response(JSON.stringify({ ok: true }));
+  } catch (error) {
+    console.error('Ошибка:', error);
+    return new Response(JSON.stringify({ ok: false, error: error.message }));
   }
 }
