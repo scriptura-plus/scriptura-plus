@@ -32,34 +32,47 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    // ADMIN MODE
+    // ADMIN MODE (Обновленная версия)
     if (senderId === ADMIN_CHAT_ID && text.startsWith('/send')) {
       const parts = text.split('|');
-      if (parts.length < 3) {
+      // Теперь формат /send <ID> | <текст сообщения>
+      // Значит, должно быть как минимум 2 части
+      if (parts.length < 2) {
         await fetch(`${TELEGRAM_API}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             chat_id: ADMIN_CHAT_ID,
-            text: '❌ Ошибка: неверный формат. Нужно: /send <ID> <ссылка> [название]',
+            text: '❌ Ошибка: неверный формат. Нужно: /send <ID> | <текст сообщения>',
           }),
         });
         return res.status(200).json({ ok: true });
       }
 
-      const targetChatId = parts[1].trim();
-      const messageLink = parts[2].trim();
-      const optionalTitle = parts.slice(3).join('|').trim();
+      const targetChatId = parts[0].replace('/send', '').trim();
+      const messageToSend = parts.slice(1).join('|').trim();
 
-      const finalMessage = `✅ Ваше исследование${optionalTitle ? `: *${optionalTitle}*` : ''}\n\n📎 ${messageLink}`;
+      if (!targetChatId || !messageToSend) {
+        await fetch(`${TELEGRAM_API}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: ADMIN_CHAT_ID,
+            text: '❌ Ошибка: не указан ID или текст сообщения.',
+          }),
+        });
+        return res.status(200).json({ ok: true });
+      }
+
 
       await fetch(`${TELEGRAM_API}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: targetChatId,
-          text: finalMessage,
-          parse_mode: 'Markdown',
+          text: messageToSend,
+          parse_mode: 'Markdown', // Эта строка позволяет использовать **жирный** и [ссылки](url)
+          disable_web_page_preview: true, // Отключаем превью ссылок для чистоты сообщения
         }),
       });
 
@@ -68,7 +81,7 @@ export default async function handler(req, res) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: ADMIN_CHAT_ID,
-          text: '✅ Ссылка успешно отправлена!',
+          text: '✅ Сообщение успешно отправлено!',
         }),
       });
 
